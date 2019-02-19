@@ -1,0 +1,123 @@
+---
+title: "Formatting Consensomes into Gene Sets"
+author: "Dave Bridges"
+date: "February 19, 2019"
+output:
+  html_document:
+    highlight: tango
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+  pdf_document:
+    highlight: tango
+    keep_tex: yes
+    number_sections: yes
+    toc: yes
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+#figures makde will go to directory called figures, will make them as both png and pdf files 
+opts_chunk$set(fig.path='figures/',
+               echo=TRUE, warning=FALSE, message=FALSE,dev=c('png','pdf'))
+options(scipen = 2, digits = 3)
+# set echo and message to TRUE if you want to display code blocks and code output respectively
+
+knitr::knit_hooks$set(inline = function(x) {
+  knitr:::format_sci(x, 'md')
+})
+
+
+superpose.eb <- function (x, y, ebl, ebu = ebl, length = 0.08, ...)
+  arrows(x, y + ebu, x, y - ebl, angle = 90, code = 3,
+  length = length, ...)
+
+  
+se <- function(x) sd(x, na.rm=T)/sqrt(length(x))
+
+#load these packages, nearly always needed
+library(tidyr)
+library(dplyr)
+
+# sets maize and blue color scheme
+color.scheme <- c('#00274c', '#ffcb05')
+```
+
+# Purpose
+
+To generate gene lists based on experimentally derived transriptional changes for predicting transcriptional networks. This script was most recently run on `r date()`.
+
+# Human to Mouse Gene Mapping
+
+```{r mapping-table}
+human_mouse_table_file <- 'http://www.informatics.jax.org/downloads/reports/HOM_MouseHumanSequence.rpt'
+human_mouse_table <- read.table(human_mouse_table_file, sep="\t", header=T)
+human.to.mouse <- 
+  human_mouse_table %>%
+  select(Common.Organism.Name, Symbol, HomoloGene.ID) %>%
+  distinct(HomoloGene.ID,Common.Organism.Name, .keep_all = T) %>%
+  spread(Common.Organism.Name, Symbol) %>%
+  rename("mouse"="mouse, laboratory") %>%
+  mutate(human = as.character(human),
+         mouse = as.character(mouse))
+```
+
+For mouse to human mapping I used the MGI human to mouse table at `r human_mouse_table_file` for conversion.
+
+# Generating Consensomes
+
+Downloaded the consensomes on 2019-02-10 with these search criteria from the query tool at https://beta.signalingpathways.org/ominer/query.jsf and saved in the **consensomes** folder.
+
+* Target Gene(s) of Interest: Consensome
+* Omics Category: Transcriptomics
+* Category Receptors; Nuclear Receptors; went through each
+* Species: House Mouse
+* Physiological System: All
+
+Several receptors did not have enough data to assemble a consensome.
+
+```{r consensome-input}
+consensome.file.list = list.files(path='consensomes-downloaded',pattern="*.csv",
+                                  full.names=T)
+library(readr)
+consensome.data = lapply(consensome.file.list, read_csv, skip=2,
+                         col_types = cols(
+  ID = col_double(),
+  Family = col_factor(levels=NULL),
+  `Physiological System` = col_factor(levels=NULL),
+  Organ = col_factor(levels=NULL),
+  Species = col_factor(levels=NULL),
+  Gene = col_factor(levels=NULL),
+  Percentile = col_double(),
+  `Discovery Rate` = col_double(),
+  GMFC = col_double(),
+  cPValue = col_double(),
+  DOI = col_factor(levels=NULL),
+  X12 = col_logical()
+)) 
+
+consensome.dataset <- do.call(rbind.data.frame, consensome.data)
+
+consensome.data.sig <- consensome.dataset %>% filter(Percentile>99)
+
+consensome.merged.data <- 
+  left_join(consensome.data.sig, human.to.mouse, by=c("Gene"="mouse")) %>% 
+  filter(!(is.na(human))) %>%
+  group_by(Family) %>%
+  select(human)
+
+consensome.filename <- 'Consensomes - Mice.csv'
+write.csv(consensome.data.sig, consensome.filename)
+
+#convert to a list
+consensome.list <- split(consensome.merged.data$human, consensome.merged.data$Family)
+```
+
+The consensome file that was downloaded are found in `r paste(consensome.file.list, sep=",")`.  These mouse genes were then mapped to human genes using the Jackson laboratory HomoloGene tables, found at `r human_mouse_table_file`.  We filtered for only genes in the top 1% of each consensome to make the gene sets.  The final consemsomes were was saved as `r consensome.filename`.
+
+
+# Session Information
+
+```{r session-information, echo=T}
+sessionInfo()
+```
